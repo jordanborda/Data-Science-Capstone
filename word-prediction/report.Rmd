@@ -1,0 +1,419 @@
+---
+title: "Assignment: Final Project"
+author: "Jordan Piero Borda Colque"
+date: "04/16/2022"
+output: html_document
+---
+
+### Summary
+
+This report, submitted in partial fulfillment of the requirements of the Coursera course, "Data Science Capstone", concerns the R package "wordprediction", which contains functions for an auto-completion model that predicts the next word to be typed based on a word or phrase previously typed.  The source code can be found at [https://github.com/jordanborda/Data-Science-Capstone](https://github.com/jordanborda/Data-Science-Capstone), and a demonstration at [https://jordanborda.shinyapps.io/word-prediction/](https://jordanborda.shinyapps.io/word-prediction/).
+
+Auto-completion is a common function on mobile devices. As a user types, an auto-completion function presents that user with possible completions to the current word being typed or probable words that could follow the current word or phrase after it is typed. The package "wordprediction" provides the latter function.
+
+### Exploratory Analysis
+
+```{r libraries, cache = TRUE, echo = FALSE, include = FALSE}
+
+# Load the necessary libraries.
+
+library("tm")
+library("ngramrr")
+
+```
+
+
+
+#### Data File
+
+```{r file, cache = TRUE, echo = FALSE, include = FALSE}
+
+#' Download Data File
+#'
+#' Downloads a data file.
+#'
+#' @param location URL of the data file to be used formatted as a character.
+#' @param data_file name of the data file to be used formatted as a character.
+#' @author Jordan Borda
+#' @details
+#' This function downloads a data file from a specified location URL for use in
+#' the package "wordprediction".
+#' @export
+#' @importFrom utils download.file
+
+download_data_file <- function(location, data_file) {
+
+    if (!file.exists(data_file)) {
+
+        download.file(
+            url = location,
+            destfile = data_file,
+            method = "curl"
+        )
+
+    }
+
+}
+
+
+#' Uncompress Data File
+#'
+#' Uncompresses a data file
+#'
+#' @param location local directory created by unpacking the data file.
+#' @param data_file name of the data file to be used formatted as a character.
+#' @author Jordan Borda
+#' @details
+#' This function uncompresses a data file for use in the package
+#' "wordprediction".
+#' @export
+#' @importFrom utils unzip
+
+uncompress_data_file <- function(location, data_file) {
+
+    if (!dir.exists(location)) {
+
+        unzip(data_file)
+
+    }
+
+}
+
+
+#' Sample Data File
+#'
+#' Samples a data file.
+#'
+#' @author Jordan Borda
+#' @details
+#' This function samples 1000 lines each from the data files via Mac OS X shell.
+#' @export
+
+sample_data_file <- function() {
+
+    if (!file.exists("./final/de_DE/de_DE.blogs.sample.txt")) {
+
+        system(
+            "
+            cd ./final/de_DE;
+            gshuf -n 1000 de_DE.blogs.txt > de_DE.blogs.sample.txt;
+            gshuf -n 1000 de_DE.news.txt > de_DE.news.sample.txt;
+            gshuf -n 1000 de_DE.twitter.txt > de_DE.twitter.sample.txt;
+            rm de_DE.blogs.txt;
+            rm de_DE.news.txt;
+            rm de_DE.twitter.txt;
+            cd ..;
+            cd ./en_US;
+            gshuf -n 1000 en_US.blogs.txt > en_US.blogs.sample.txt;
+            gshuf -n 1000 en_US.news.txt > en_US.news.sample.txt;
+            gshuf -n 1000 en_US.twitter.txt > en_US.twitter.sample.txt;
+            rm en_US.blogs.txt;
+            rm en_US.news.txt;
+            rm en_US.twitter.txt;
+            cd ..;
+            cd ./fi_FI;
+            gshuf -n 1000 fi_FI.blogs.txt > fi_FI.blogs.sample.txt;
+            gshuf -n 1000 fi_FI.news.txt > fi_FI.news.sample.txt;
+            gshuf -n 1000 fi_FI.twitter.txt > fi_FI.twitter.sample.txt;
+            rm fi_FI.blogs.txt;
+            rm fi_FI.news.txt;
+            rm fi_FI.twitter.txt;
+            cd ..;
+            cd ./ru_RU;
+            gshuf -n 1000 ru_RU.blogs.txt > ru_RU.blogs.sample.txt;
+            gshuf -n 1000 ru_RU.news.txt > ru_RU.news.sample.txt;
+            gshuf -n 1000 ru_RU.twitter.txt > ru_RU.twitter.sample.txt;
+            rm ru_RU.blogs.txt;
+            rm ru_RU.news.txt;
+            rm ru_RU.twitter.txt;
+            cd ..; cd ..;
+            "
+        )
+
+    }
+
+}
+
+```
+
+In order to build a function that can provide word-prediction, a predictive model is needed.  Such models use known content to predict unknown content.  For this package, that content comes from the HC Corpora collection, which is "a collection of corpora for various languages freely available to download" (Christensen, n.d.). The version used was obtained from an archive maintained at Coursera (Leek, Peng, Caffo, & Johns Hopkins University, n.d.).  The file included three text document collections, blogs, news feeds, and tweets, in four languages, German, English, Finnish, and Russian, of which only the English collections were used.  The files were too large to be manipulated using a home computer (e.g., the downloaded ZIP file was 575 MB).  Therefore, 1000 lines were randomly sampled from each collection using a Mac OS X (Version x86_64-apple-darwin13.4.0) terminal application before loading for analysis in RStudio (Version 0.99.892) running the R statistical programming language (Version 3.2.3).
+
+#### Data Structure
+
+```{r structure, cache = TRUE, echo = FALSE, include = FALSE}
+
+#' Read Data
+#'
+#' Reads data into a corpus.
+#'
+#' @param language
+#' a character giving the language as IETF language tags "de" for German, "en"
+#' for English, "fi" for Finnish, or "ru" for Russian.
+#' @return corpus a volatile text corpus as a "tm" package object
+#' @author Jordan Borda
+#' @details
+#' This function reads from a data file as an object of type "corpus" from the
+#' "tm" ppackage. It chooses the files corresponding to the language indicated
+#' by the language parameter.
+#' @export
+#' @importFrom tm VCorpus
+#' @importFrom tm DirSource
+#' @importFrom tm readPlain
+
+read_data <- function(language) {
+
+    if (language == "de") {
+
+        if (!exists("corpus")) {
+
+            VCorpus(
+                DirSource("./final/de_DE"),
+                readerControl = list(reader = readPlain, language  = "de")
+            )
+
+        }
+
+    } else if (language == "en") {
+
+        if (!exists("corpus")) {
+
+            VCorpus(
+                DirSource("./final/en_US"),
+                readerControl = list(reader = readPlain)
+            )
+
+        }
+
+    } else if (language == "fi") {
+
+        if (!exists("corpus")) {
+
+            VCorpus(
+                DirSource("./final/fi_FI"),
+                readerControl = list(reader = readPlain, language  = "fi")
+            )
+
+        }
+
+    } else if (language == "ru") {
+
+        if (!exists("corpus")) {
+
+            VCorpus(
+                DirSource("./final/ru_RU"),
+                readerControl = list(reader = readPlain, language  = "ru")
+            )
+
+        }
+
+    }
+
+}
+
+```
+
+This package uses the data stuctures described in Feinerer, Hornik, and Meyer (2008) from the Text Mining Package (Version 0.6-2; Feinerer, Hornik, & Artifex Software, Inc., 2015) "tm".  In these structures, text document collections are organized into corpora, the basic objects to be manipulated by the word-prediction function.  Accordingly, the HC Corpora data file were loaded as tm corpora.
+
+#### Data Cleaning
+
+```{r cleaning, cache = TRUE, echo = FALSE, include = FALSE}
+
+#' Preprocess Corpus
+#'
+#' Preprocesses the corpus.
+#'
+#' @param corpus a volatile text corpus as a "tm" package object
+#' @return a preprocessed volatile text corpus as a "tm" package object
+#' @author Jordan Borda
+#' @details
+#' This function preprocesses a corpus by removing punctuation, numbers, and
+#' English stopwords, and stripping whitespace.
+#' @export
+#' @importFrom tm tm_map
+#' @importFrom tm removePunctuation
+#' @importFrom tm removeNumbers
+#' @importFrom tm content_transformer
+#' @importFrom tm stripWhitespace
+#' @importFrom tm removeWords
+#' @importFrom tm stopwords
+
+preprocess_corpus <- function(corpus) {
+
+    # Remove punctuation from text.
+    corpus_preprocessed <- tm_map(corpus, removePunctuation)
+
+    # Remove numbers from text.
+    corpus_preprocessed <- tm_map(corpus_preprocessed, removeNumbers)
+
+    # Convert text to lowercase.
+    corpus_preprocessed <-
+        tm_map(corpus_preprocessed, content_transformer(tolower))
+
+    # Strip whitespace from text.
+    corpus_preprocessed <- tm_map(corpus_preprocessed, stripWhitespace)
+
+    # Stem the text.
+    # corpus_preprocessed <- tm_map(corpus_preprocessed, stemDocument)
+
+    # Remove stopwords.
+    corpus_preprocessed <-
+        tm_map(corpus_preprocessed, removeWords, stopwords("en"))
+
+    # Return value.
+    return(corpus_preprocessed)
+
+}
+
+```
+
+Data cleaning involves transforming the raw text in the corpus into a format more suitable for automated manipulation.  The tm package provides numerous functions for such transformations (see Feinerer et al., 2008, p. 9).  For this package, the texts were converted to lower case, stripped of whitespace, and common stopwords (i.e., words so common that they contain little information; see Feinerer et al., 2008, pp. 25-26) were removed.
+
+#### Data Features
+
+```{r features, cache = TRUE, echo = FALSE, include = FALSE}
+
+#' Create n-Gram
+#'
+#' Creates a n-gram-tokenized term-document matrix (TDM).
+#'
+#' @param corpus corpus to be tokenized
+#' @param n size of n-gram
+#' @return a n-gram-tokenized term-document matrix
+#' @author Jordan Borda
+#' @details
+#' This function creates a n-gram-tokenized term-document matrix.
+#' @export
+#' @importFrom tm TermDocumentMatrix
+#' @importFrom ngramrr tdm2
+
+create_ngram <- function(corpus, n) {
+
+    if (n == 1) {
+
+        TermDocumentMatrix(corpus)
+
+    } else {
+
+        tdm2(corpus, ngmin = n, ngmax = n)
+
+    }
+
+}
+
+
+# Main function calls.
+
+download_data_file(
+    "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip",
+    "Coursera-SwiftKey.zip"
+)
+
+uncompress_data_file("final", "Coursera-SwiftKey.zip")
+
+sample_data_file()
+
+corpus <- read_data("en")
+
+corpus_cleaned <- preprocess_corpus(corpus)
+
+tdm_unigram <- create_ngram(corpus_cleaned, 1)
+tdm_bigram <- create_ngram(corpus_cleaned, 2)
+tdm_trigram <- create_ngram(corpus_cleaned, 3)
+
+# Create a Term-Document Matrix (TDM).
+
+# Explore the TDM.
+
+# Find the number of words in each text collection.
+
+term_frequency_blogs <- termFreq(corpus_cleaned[[1]])
+term_frequency_news <- termFreq(corpus_cleaned[[2]])
+term_frequency_twitter <- termFreq(corpus_cleaned[[3]])
+
+# Create a table
+length_sum_matrix <-
+    matrix(
+       c(
+            length(term_frequency_blogs),
+            length(term_frequency_news),
+            length(term_frequency_twitter),
+            sum(term_frequency_blogs),
+            sum(term_frequency_news),
+            sum(term_frequency_twitter)
+        ),
+        ncol = 3,
+        byrow = TRUE
+    )
+colnames(length_sum_matrix) <- c("Blogs","News Feeds","Tweets")
+rownames(length_sum_matrix) <- c("Unique Words","Sum of Words")
+length_sum_table <- as.table(length_sum_matrix)
+
+term_frequency_range <- range(tdm_unigram$v)
+
+frequent_terms <- findFreqTerms(tdm_unigram, lowfreq = 30, highfreq = 30)
+
+```
+
+From the cleaned English corpus, a term-document matrix (TDM) was created, which is a matrix of words or phrases and their frequencies in a corpus.  For this corpus, the range of frequencies for words was `r term_frequency_range[1]` to `r term_frequency_range[2]`.  The most important words were defined as those words not appearing too infrequently or too frequently.  Reasoning like Feinerer et al. (2008):
+
+```
+we take values around 30, since smaller values for this corpus tend to be already negligible due to the large number of documents. On the other side bigger values tend to be too common in most of the newsgroup postings.  (p. 39)
+```
+
+These important words are as follows:
+
+```{r features.frequent.terms, cache = TRUE, echo = FALSE}
+
+frequent_terms
+
+```
+
+A table was then created that shows the number of unique words and the summed frequency of those words for each of the three text collections, as follows:
+
+```{r features.table, cache = TRUE, echo = FALSE}
+
+length_sum_table
+
+```
+
+Finally, in order to check whether the size of the samples of the collections, which was 1000 each, was sufficient, the term-document matrix was checked to see if they obeyed two laws from linguistics concerning large corpora.  First, "Zipf's law ... states that given some corpus of natural language utterances, the frequency of any word is inversely proportional to its rank in the frequency table" (Explore Corpus Term Frequency Characteristics, n.d.).
+
+```{r features.zipf.plot, cache = TRUE, echo = FALSE}
+
+zipf_plot <- Zipf_plot(tdm_unigram, main = "Zipf's Law")
+
+```
+
+*Figure 1. Zipf's law holds for this matrix, especially for higher ranks, as shown by the adherence of the curve obtained from the data to the theoretical diagonal line.*
+
+Second, "Heaps' law ... states that the vocabulary size V (i.e., the number of different terms employed) grows polynomially with the text size T (the total number of terms in the texts)" (Explore Corpus Term Frequency Characteristics, n.d.).
+
+```{r features.heaps.plot, cache = TRUE, echo = FALSE}
+
+heaps_plot <- Heaps_plot(tdm_unigram, main = "Heap's Law")
+
+```
+
+*Figure 2. Heap's law holds extremely for this matrix, as shown by the near complete adherence of the line obtained from the data to the theoretical diagonal line.*
+
+### Data Processing
+
+According to Wikipedia (N-gram, n.d.), "an *n*-gram is a contiguous sequence of n items from a given sequence of text or speech."  This package takes a key word or phrase, matches that key to the most frequent *n*-1 term found in a TDM of *n*-word terms, and returns the *n*th word of that item.
+
+Of course, not all possible words or phrases exist in the corpus from which the TDM was derived.  For this reason, a simplified Katz's back-off model is used, which backs off to smaller *n*-grams when a key is not found in the larger *n*-gram.  The maximum *n*-gram handled is a trigram.  The word returned is the match found in the largest *n*-gram where the key is found.  When the key is not found in the unigram, the most common word in the corpus "will" is returned.  This function is demonstrated using a Shiny app hosted on shinyapps.io at [https://jordanborda.shinyapps.io/word-prediction/](https://jordanborda.shinyapps.io/word-prediction/).
+
+### Conclusion
+
+This report has shown features the R package "wordprediction".  It was designed using samples of 1000 words each from a corpus of collections English words.  The corpus has a large range of words and word frequencies with a number of important words.  The sample size was large enough to satisfy two laws from linguistics concerning large corpora.  If the desired sample size is deemed to be too small, it can easilly be increased by editing the source code.  As is, this analysis ran rather quickly on a home computer and on shinyapps.io.  As shown in a demonstration, all phrases and words submitted to the function "katz_backoff_model" result in a prediction in the form of a single word returned.
+
+### References
+
+Christensen, H. (n.d.). *HC Corpora*. Retrieved from [http://www.corpora.heliohost.org](http://www.corpora.heliohost.org)
+
+Explore Corpus Term Frequency Characteristics [Computer software]. (n.d.). Retrieved from http://www.inside-r.org/packages/cran/tm/docs/Zipf_n_Heaps
+
+Feinerer, I., Hornik, K., & Artifex Software, Inc. (2015, July 2). Text Mining Package [Computer software]. Retrieved from [http://tm.r-forge.r-project.org](http://tm.r-forge.r-project.org)
+
+Feinerer, I., Hornik, K., & Meyer, D. (2008). *Text mining infrastructure in R. Journal of Statistical Software, 25*(5), 1–54. [http://doi.org/citeulike-article-id:2842334](http://doi.org/citeulike-article-id:2842334)
+
+Leek, J., Peng, R., Caffo, B., & Johns Hopkins University (n.d.). *Data Science Capstone*, Coursera. Retrieved from [https://www.coursera.org/learn/data-science-project/](https://www.coursera.org/learn/data-science-project/)
